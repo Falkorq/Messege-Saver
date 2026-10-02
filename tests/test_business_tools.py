@@ -64,7 +64,7 @@ class CommandUITests(unittest.IsolatedAsyncioTestCase):
         db.row_factory = sqlite3.Row
         repo = BusinessToolsRepository(db, {100: 1})
         repo.migrate()
-        ui = BusinessToolsUI(reply_bot, SimpleNamespace(account_labels={100: "Yui"}), repo, {100: 1}, "unused.png")
+        ui = BusinessToolsUI(reply_bot, SimpleNamespace(account_labels={100: "Account 1"}), repo, {100: 1}, "unused.png")
         await ui.handle_command(SimpleNamespace(
             from_user=SimpleNamespace(id=100), chat=SimpleNamespace(id=100), text="/chatstats"
         ))
@@ -167,7 +167,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.bot = FakeBot()
         self.notifications = []
         self.service = BusinessToolsService(
-            self.bot, self.repo, lambda owner, text: self.notifications.append((owner, text)), {100: "Yui"}
+            self.bot, self.repo, lambda owner, text: self.notifications.append((owner, text)), {100: "Account 1"}
         )
 
     async def test_stats_sections_show_only_relevant_details(self):

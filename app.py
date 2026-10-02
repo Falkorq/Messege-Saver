@@ -40,18 +40,30 @@ if not TOKEN or TOKEN == "123456:replace_me":
     raise SystemExit("Укажите BOT_TOKEN в .env")
 
 my_chat_id = required_int("MY_CHAT_ID")
-girl_chat_id = required_int("GIRL_CHAT_ID")
-if my_chat_id == girl_chat_id:
-    raise SystemExit("MY_CHAT_ID и GIRL_CHAT_ID должны быть разными, чтобы уведомления не смешивались")
 try:
-    my_account_ids = [int(item.strip()) for item in os.environ["MY_ACCOUNT_IDS"].split(",")]
+    my_account_ids = [int(item.strip()) for item in os.environ["MY_ACCOUNT_IDS"].split(",") if item.strip()]
 except (KeyError, ValueError) as exc:
-    raise SystemExit("Укажите три числовых ID в MY_ACCOUNT_IDS") from exc
-if len(my_account_ids) != 3 or len(set(my_account_ids)) != 3:
-    raise SystemExit("MY_ACCOUNT_IDS должен содержать три разных ID")
-girl_account_id = required_int("GIRL_ACCOUNT_ID")
-if girl_account_id in my_account_ids:
-    raise SystemExit("GIRL_ACCOUNT_ID не должен совпадать с MY_ACCOUNT_IDS")
+    raise SystemExit("Укажите числовые ID в MY_ACCOUNT_IDS (через запятую)") from exc
+if not my_account_ids or len(set(my_account_ids)) != len(my_account_ids):
+    raise SystemExit("MY_ACCOUNT_IDS должен содержать хотя бы один уникальный ID")
+
+second_chat_id = None
+second_account_ids = []
+if os.getenv("SECOND_ACCOUNT_IDS"):
+    if os.getenv("SECOND_CHAT_ID") is None:
+        raise SystemExit("Укажите SECOND_CHAT_ID вместе с SECOND_ACCOUNT_IDS")
+    second_chat_id = required_int("SECOND_CHAT_ID")
+    try:
+        second_account_ids = [int(item.strip()) for item in os.environ["SECOND_ACCOUNT_IDS"].split(",") if item.strip()]
+    except ValueError as exc:
+        raise SystemExit("SECOND_ACCOUNT_IDS должен содержать числовые ID через запятую") from exc
+    if not second_account_ids or len(set(second_account_ids)) != len(second_account_ids):
+        raise SystemExit("SECOND_ACCOUNT_IDS должен содержать хотя бы один уникальный ID")
+    if second_chat_id == my_chat_id:
+        raise SystemExit("MY_CHAT_ID и SECOND_CHAT_ID должны быть разными, чтобы уведомления не смешивались")
+    overlap = set(second_account_ids) & set(my_account_ids)
+    if overlap:
+        raise SystemExit(f"SECOND_ACCOUNT_IDS не должен пересекаться с MY_ACCOUNT_IDS: {sorted(overlap)}")
 
 try:
     retention_days = int(os.getenv("RETENTION_DAYS", "90"))
@@ -60,10 +72,25 @@ except ValueError as exc:
 if retention_days < 1:
     raise SystemExit("RETENTION_DAYS должен быть положительным")
 
+
+def parse_account_labels(all_account_ids):
+    """ACCOUNT_LABELS вида '111111:Home,222222:Work' — необязательные подписи аккаунтов."""
+    labels = {}
+    for chunk in os.getenv("ACCOUNT_LABELS", "").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        account, _, label = chunk.partition(":")
+        try:
+            labels[int(account.strip())] = label.strip()
+        except ValueError as exc:
+            raise SystemExit("ACCOUNT_LABELS должен иметь вид 'ID:подпись,ID:подпись'") from exc
+    return {account_id: labels.get(account_id, f"Account {str(account_id)[-4:]}") for account_id in all_account_ids}
+
+
 routes = {account_id: my_chat_id for account_id in my_account_ids}
-routes[girl_account_id] = girl_chat_id
-account_labels = {account_id: "Yui" for account_id in my_account_ids}
-account_labels[girl_account_id] = "Yunakiya"
+routes.update({account_id: second_chat_id for account_id in second_account_ids})
+account_labels = parse_account_labels(my_account_ids + second_account_ids)
 admin_ids = set(my_account_ids)
 db_path = Path(os.getenv("DB_PATH", "messages.sqlite3"))
 db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -418,11 +445,10 @@ async def on_control(msg):
         await bot.send_message(
             msg.chat.id,
             "Отправь /setemoji delete с премиум-эмодзи для удалений и /setemoji edit с другим эмодзи для правок. "
-            "Можно ответить командой на сообщение, содержащее нужный эмодзи. Оформление задаётся отдельно для твоих аккаунтов и аккаунта девушки.\n\nПример:",
+            "Можно ответить командой на сообщение, содержащее нужный эмодзи. Оформление задаётся отдельно для каждого получателя.\n\nПример:",
         )
         example = {"name": "Пример", "sender_id": None, "username": None, "sent_at": int(time.time())}
-        example_account_id = (girl_account_id if recipient_id == girl_chat_id else
-                              recipient_id if recipient_id in access.routes and recipient_id not in admin_ids else my_account_ids[0])
+        example_account_id = next(iter(routes))
         example.update({"chat_id": 123456789, "chat_name": "Пример чата"})
         await send_rich_text(msg.chat.id, "delete", "Удалено сообщение", example_account_id, example, "Текст удалённого сообщения")
         await send_rich_text(msg.chat.id, "edit", "Изменено сообщение", example_account_id, example, "старый текст", "новый текст")

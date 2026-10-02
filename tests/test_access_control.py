@@ -12,14 +12,14 @@ class AccessManagerTests(unittest.TestCase):
         self.db = sqlite3.connect(":memory:")
         self.db.row_factory = sqlite3.Row
         self.routes = {1: 1, 2: 2}
-        self.labels = {1: "Yui", 2: "Yunakiya"}
+        self.labels = {1: "Account 1", 2: "Account 2"}
         self.access = AccessManager(self.db, self.routes, self.labels, {1, 2})
 
     def test_grant_persists_and_revoke_removes_route(self):
         self.access.grant(3, "Друг")
         self.assertEqual(self.routes[3], 3)
         self.assertEqual(self.labels[3], "Друг")
-        restarted = AccessManager(self.db, {1: 1, 2: 2}, {1: "Yui", 2: "Yunakiya"}, {1, 2})
+        restarted = AccessManager(self.db, {1: 1, 2: 2}, {1: "Account 1", 2: "Account 2"}, {1, 2})
         self.assertEqual(restarted.routes[3], 3)
         self.assertTrue(self.access.revoke(3))
         self.assertNotIn(3, self.routes)
