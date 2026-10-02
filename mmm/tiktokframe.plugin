@@ -1,0 +1,1392 @@
+# 🇷🇺: Привет это создатель плагина! если в создании своего плагина вы ищете готовых
+# решений пожалуйста отметьте автора в плагине, автор wers или же уведомите владельца
+# через сообщения в канале с описанием того что вы взяли и сам плагин, спасибо!:3
+#
+# 🇺🇲: Hey, this is a creator of this plugin! If you're looking for ready-made solutions
+# when creating your own plugin, please tag the author in the plugin. The author is wers,
+# or notify the owner via messages in the channel with a description of what you took
+# and your plugin itself, thank you!:3
+#
+# ▄▄▄█████▓▄▄▄█████▓     █████▒██▀███   ▄▄▄       ███▄ ▄███▓▓█████
+# ▓  ██▒ ▓▒▓  ██▒ ▓▒   ▓██   ▒▓██ ▒ ██▒▒████▄    ▓██▒▀█▀ ██▒▓█   ▀
+# ▒ ▓██░ ▒░▒ ▓██░ ▒░   ▒████ ░▓██ ░▄█ ▒▒██  ▀█▄  ▓██    ▓██░▒███
+# ░ ▓██▓ ░ ░ ▓██▓ ░    ░▓█▒  ░▒██▀▀█▄  ░██▄▄▄▄██ ▒██    ▒██ ▒▓█  ▄
+#   ▒██▒ ░   ▒██▒ ░    ░▒█░   ░██▓ ▒██▒ ▓█   ▓██▒▒██▒   ░██▒░▒████▒
+#   ▒ ░░     ▒ ░░       ▒ ░   ░ ▒▓ ░▒▓░ ▒▒   ▓▒█░░ ▒░   ░  ░░░ ▒░ ░
+#     ░        ░        ░       ░▒ ░ ▒░  ▒   ▒▒ ░░  ░      ░ ░ ░  ░
+#   ░        ░          ░ ░     ░░   ░   ░   ▒   ░      ░      ░
+#                                ░           ░  ░       ░      ░  ░
+
+from base_plugin import BasePlugin, HookResult, HookStrategy
+from ui.settings import Header, Text, Input, Divider, Switch, Selector
+from client_utils import get_send_messages_helper, get_messages_controller, send_request, RequestCallback, send_message
+from ui.bulletin import BulletinHelper
+from org.telegram.tgnet import TLRPC
+from android_utils import log
+from java.util import Locale, Date
+from java.text import SimpleDateFormat
+
+from PIL import Image, ImageDraw, ImageFont, ImageOps
+import requests, uuid, os, traceback, threading, re
+
+__id__ = "tiktokframe"
+__name__ = "Tiktokframe"
+__description__ = "Превращает сообщение в тикток-комментарий и вставляет его в золотую рамку. Команда: .f (ответом на сообщение). .f2/.f3/.f4, несколько сообщений в одной рамке. Подробная инструкция была опубликована в t.me/w3rs_c0mmun17y"
+__usage__ = ".f (ответом на сообщение)"
+__author__ = "@werrsined"
+__min_version__ = "12.5.1"
+__icon__ = "Tiktokframe/0"
+__version__ = "1.5.0"
+
+FRAME_URL = "https://www.clipartmax.com/png/full/283-2835256_golden-frame-png-image-background-frame-gold-png-transparent.png"
+FRAME_CACHE_NAME = "frame_gold_cut.png"
+
+FONT_PROFILES = {
+    "hack": {
+        "label": "Hack",
+        "url": "https://github.com/source-foundry/Hack/raw/refs/heads/master/build/ttf/Hack-Bold.ttf",
+        "regular_url": "https://github.com/source-foundry/Hack/raw/refs/heads/master/build/ttf/Hack-Regular.ttf",
+        "variable": False,
+    },
+    "tiktoksans": {
+        "label": "TikTok Sans",
+        "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/tiktoksans/TikTokSans%5Bopsz%2Cslnt%2Cwdth%2Cwght%5D.ttf",
+        "variable": True,
+        "bold_variation": "Bold",
+        "regular_variation": "Regular",
+    },
+    "rubik": {
+        "label": "Rubik",
+        "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/rubik/Rubik%5Bwght%5D.ttf",
+        "variable": True,
+        "bold_variation": "Bold",
+        "regular_variation": "Regular",
+    },
+    "manrope": {
+        "label": "Manrope",
+        "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/manrope/Manrope%5Bwght%5D.ttf",
+        "variable": True,
+        "bold_variation": "Bold",
+        "regular_variation": "Regular",
+    },
+}
+DEFAULT_FONT_PROFILE = "hack"
+FONT_PROFILE_ORDER = ["hack", "tiktoksans", "rubik", "manrope"]
+_current_font_profile = [DEFAULT_FONT_PROFILE]
+
+TWEMOJI_BASE = "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/"
+
+DEFAULT_COMMAND = ".f"
+MIN_CARD_WIDTH = 620
+MAX_CARD_WIDTH = 1400
+MAX_ASPECT_DISTORTION = 1.35
+MAX_MESSAGE_CHARS = 400
+
+DEFAULT_TIME_FORMAT = "HH:mm"
+
+
+def flog(message):
+    try:
+        log(f"[Tiktokframe] {message}")
+    except Exception:
+        pass
+
+
+def is_english():
+    try:
+        return not Locale.getDefault().getLanguage().startswith("ru")
+    except Exception:
+        return False
+
+
+def tr(ru, en):
+    return en if is_english() else ru
+
+
+def format_message_time(unix_timestamp, pattern):
+    try:
+        sdf = SimpleDateFormat(pattern, Locale.getDefault())
+        return sdf.format(Date(int(unix_timestamp) * 1000))
+    except Exception:
+        try:
+            sdf = SimpleDateFormat(DEFAULT_TIME_FORMAT, Locale.getDefault())
+            return sdf.format(Date(int(unix_timestamp) * 1000))
+        except Exception:
+            return ""
+
+
+def temp_dir():
+    import tempfile
+    d = os.path.join(tempfile.gettempdir(), "tiktok_frame")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def emoji_dir():
+    d = os.path.join(temp_dir(), "emoji_cache")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def write_file(path, data):
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+class FontManager:
+    _paths = {}  # profile_id -> local ttf path
+    _ready_events = {}  # profile_id -> threading.Event
+    _lock = threading.Lock()
+
+    @staticmethod
+    def _event_for(profile_id):
+        with FontManager._lock:
+            ev = FontManager._ready_events.get(profile_id)
+            if ev is None:
+                ev = threading.Event()
+                FontManager._ready_events[profile_id] = ev
+            return ev
+
+    @staticmethod
+    def init(profile_id=None):
+        profile_id = profile_id or DEFAULT_FONT_PROFILE
+        threading.Thread(target=FontManager._download, args=(profile_id,), daemon=True).start()
+
+    @staticmethod
+    def init_all():
+        for pid in FONT_PROFILES:
+            FontManager.init(pid)
+
+    @staticmethod
+    def _download(profile_id):
+        profile = FONT_PROFILES.get(profile_id)
+        if profile is None:
+            return
+        tdir = temp_dir()
+        path = os.path.join(tdir, f"font_{profile_id}.ttf")
+        try:
+            if os.path.exists(path) and not FontManager._is_valid_font(path):
+                os.remove(path)
+            if not os.path.exists(path):
+                r = requests.get(profile["url"], timeout=20)
+                r.raise_for_status()
+                write_file(path, r.content)
+            if FontManager._is_valid_font(path):
+                with FontManager._lock:
+                    FontManager._paths[profile_id] = path
+        except Exception as e:
+            flog(f"font download failed for {profile_id}: {e}")
+        FontManager._event_for(profile_id).set()
+
+    @staticmethod
+    def _is_valid_font(path):
+        try:
+            ImageFont.truetype(path, 10)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def is_ready(profile_id=None):
+        profile_id = profile_id or _current_font_profile[0]
+        path = FontManager._paths.get(profile_id)
+        return path is not None and os.path.exists(path)
+
+    @staticmethod
+    def ensure_ready(timeout=15, profile_id=None):
+        profile_id = profile_id or _current_font_profile[0]
+        FontManager._event_for(profile_id).wait(timeout)
+        if FontManager.is_ready(profile_id):
+            return True
+        if profile_id != DEFAULT_FONT_PROFILE:
+            FontManager.init(DEFAULT_FONT_PROFILE)
+            FontManager._event_for(DEFAULT_FONT_PROFILE).wait(timeout)
+            return FontManager.is_ready(DEFAULT_FONT_PROFILE)
+        return False
+
+    @staticmethod
+    def reset(profile_id=None):
+        if profile_id is None:
+            with FontManager._lock:
+                FontManager._paths.clear()
+                FontManager._ready_events.clear()
+        else:
+            with FontManager._lock:
+                FontManager._paths.pop(profile_id, None)
+                FontManager._ready_events.pop(profile_id, None)
+
+    @staticmethod
+    def _resolve_path(profile_id):
+        path = FontManager._paths.get(profile_id)
+        if path and os.path.exists(path):
+            return path
+        fallback = FontManager._paths.get(DEFAULT_FONT_PROFILE)
+        if fallback and os.path.exists(fallback):
+            return fallback
+        return None
+
+    @staticmethod
+    def _load_variant(size, variation_key):
+        profile_id = _current_font_profile[0]
+        profile = FONT_PROFILES.get(profile_id, FONT_PROFILES[DEFAULT_FONT_PROFILE])
+        path = FontManager._resolve_path(profile_id)
+        if not path:
+            return ImageFont.load_default()
+        try:
+            font = ImageFont.truetype(path, size)
+            if profile.get("variable"):
+                variation_name = profile.get(variation_key)
+                if variation_name:
+                    try:
+                        font.set_variation_by_name(variation_name)
+                    except Exception:
+                        pass
+            return font
+        except Exception:
+            return ImageFont.load_default()
+
+    @staticmethod
+    def get_bold(size):
+        return FontManager._load_variant(size, "bold_variation")
+
+    @staticmethod
+    def get_regular(size):
+        profile_id = _current_font_profile[0]
+        profile = FONT_PROFILES.get(profile_id, FONT_PROFILES[DEFAULT_FONT_PROFILE])
+        if not profile.get("variable") and profile.get("regular_url"):
+            return FontManager._load_static_regular(profile_id, profile, size)
+        return FontManager._load_variant(size, "regular_variation")
+
+    @staticmethod
+    def _load_static_regular(profile_id, profile, size):
+        tdir = temp_dir()
+        path = os.path.join(tdir, f"font_{profile_id}_regular.ttf")
+        if not os.path.exists(path) or not FontManager._is_valid_font(path):
+            try:
+                r = requests.get(profile["regular_url"], timeout=20)
+                r.raise_for_status()
+                write_file(path, r.content)
+            except Exception as e:
+                flog(f"static regular font download failed for {profile_id}: {e}")
+                return FontManager.get_bold(size)
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            return FontManager.get_bold(size)
+
+
+class FrameManager:
+    frame_path = None
+    inner_box = None
+    _lock = threading.Lock()
+    _ready_event = threading.Event()
+
+    @staticmethod
+    def init():
+        threading.Thread(target=FrameManager._prepare, daemon=True).start()
+
+    @staticmethod
+    def force_refresh():
+        with FrameManager._lock:
+            tdir = temp_dir()
+            cache_path = os.path.join(tdir, FRAME_CACHE_NAME)
+            meta_path = cache_path + ".box"
+            for p in (cache_path, meta_path):
+                if os.path.exists(p):
+                    os.remove(p)
+        FrameManager._ready_event.clear()
+        FrameManager.frame_path = None
+        FrameManager.inner_box = None
+        FrameManager.init()
+
+    @staticmethod
+    def _prepare():
+        with FrameManager._lock:
+            try:
+                tdir = temp_dir()
+                cache_path = os.path.join(tdir, FRAME_CACHE_NAME)
+                meta_path = cache_path + ".box"
+
+                if os.path.exists(cache_path) and os.path.exists(meta_path):
+                    try:
+                        with open(meta_path, "r") as f:
+                            box = tuple(int(v) for v in f.read().strip().split(","))
+                        if len(box) != 4:
+                            raise ValueError("bad box")
+                        Image.open(cache_path).verify()
+                        FrameManager.frame_path = cache_path
+                        FrameManager.inner_box = box
+                        return
+                    except Exception:
+                        flog("cached frame is corrupted, re-downloading")
+                        for p in (cache_path, meta_path):
+                            try:
+                                os.remove(p)
+                            except OSError:
+                                pass
+
+                r = requests.get(FRAME_URL, timeout=20)
+                r.raise_for_status()
+                raw_path = os.path.join(tdir, "frame_raw.png")
+                write_file(raw_path, r.content)
+
+                img = Image.open(raw_path).convert("RGBA")
+                w, h = img.size
+                px = img.load()
+
+                def is_dark_opaque(x, y):
+                    r_, g_, b_, a_ = px[x, y]
+                    return a_ > 200 and (r_ + g_ + b_) < 90
+
+                inner_pts = FrameManager._flood_fill(is_dark_opaque, w, h)
+                if inner_pts is None:
+                    FrameManager.frame_path = raw_path
+                    FrameManager.inner_box = (int(w * 0.17), int(h * 0.23), int(w * 0.84), int(h * 0.77))
+                    with open(meta_path, "w") as f:
+                        f.write(",".join(str(v) for v in FrameManager.inner_box))
+                    return
+
+                xs = [p[0] for p in inner_pts]
+                ys = [p[1] for p in inner_pts]
+                box = (min(xs), min(ys), max(xs), max(ys))
+
+                for (x, y) in inner_pts:
+                    r_, g_, b_, _ = px[x, y]
+                    px[x, y] = (r_, g_, b_, 0)
+
+                img.save(cache_path)
+                with open(meta_path, "w") as f:
+                    f.write(",".join(str(v) for v in box))
+
+                FrameManager.frame_path = cache_path
+                FrameManager.inner_box = box
+            except Exception:
+                flog("FrameManager._prepare error\n" + traceback.format_exc())
+            finally:
+                FrameManager._ready_event.set()
+
+    @staticmethod
+    def _flood_fill(predicate, w, h):
+        from collections import deque
+
+        cx, cy = w // 2, h // 2
+        if not predicate(cx, cy):
+            return None
+
+        visited = {(cx, cy)}
+        q = deque([(cx, cy)])
+        while q:
+            x, y = q.popleft()
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in visited and predicate(nx, ny):
+                    visited.add((nx, ny))
+                    q.append((nx, ny))
+        return visited
+
+    @staticmethod
+    def is_ready():
+        return FrameManager.frame_path is not None and FrameManager.inner_box is not None and os.path.exists(FrameManager.frame_path)
+
+    @staticmethod
+    def ensure_ready(timeout=20):
+        FrameManager._ready_event.wait(timeout)
+        return FrameManager.is_ready()
+
+
+class EmojiManager:
+    _cache = {}
+    _lock = threading.Lock()
+
+    _RANGES = [
+        (0x1F000, 0x1FFFF),
+        (0x2300, 0x23FF),
+        (0x2460, 0x27BF),
+        (0x2B00, 0x2BFF),
+        (0x2190, 0x21FF),
+        (0x2600, 0x26FF),
+        (0xFE00, 0xFE0F),
+        (0x1F1E6, 0x1F1FF),
+    ]
+    _SINGLE_CODEPOINTS = {0x203C, 0x2049, 0x20E3, 0x2122, 0x2139, 0x2194, 0x2195, 0x2196, 0x2197, 0x2198, 0x2199}
+
+    @staticmethod
+    def is_emoji_char(ch):
+        cp = ord(ch)
+        if cp in (0x200D, 0xFE0F, 0xFE0E):
+            return True
+        if cp in EmojiManager._SINGLE_CODEPOINTS:
+            return True
+        for lo, hi in EmojiManager._RANGES:
+            if lo <= cp <= hi:
+                return True
+        return False
+
+    @staticmethod
+    def _is_regional(ch):
+        return 0x1F1E6 <= ord(ch) <= 0x1F1FF
+
+    @staticmethod
+    def split_text(text):
+        tokens = []
+        buf = ""
+        i, n = 0, len(text)
+        while i < n:
+            ch = text[i]
+            if EmojiManager.is_emoji_char(ch) and ch not in (chr(0x200D), chr(0xFE0F), chr(0xFE0E)):
+                if buf:
+                    tokens.append(("text", buf))
+                    buf = ""
+                cluster = ch
+                j = i + 1
+
+                if EmojiManager._is_regional(ch) and j < n and EmojiManager._is_regional(text[j]):
+                    cluster += text[j]
+                    j += 1
+                    tokens.append(("emoji", cluster))
+                    i = j
+                    continue
+
+                while j < n and text[j] in (chr(0xFE0F), chr(0xFE0E)):
+                    cluster += text[j]
+                    j += 1
+                while j < n and text[j] == chr(0x200D) and j + 1 < n and EmojiManager.is_emoji_char(text[j + 1]):
+                    cluster += text[j] + text[j + 1]
+                    j += 2
+                    while j < n and text[j] in (chr(0xFE0F), chr(0xFE0E)):
+                        cluster += text[j]
+                        j += 1
+                tokens.append(("emoji", cluster))
+                i = j
+            else:
+                buf += ch
+                i += 1
+        if buf:
+            tokens.append(("text", buf))
+        return tokens
+
+    @staticmethod
+    def preload(emoji_values, timeout_per_item=2.5, total_timeout=6.0):
+        import time
+        start = time.time()
+        for value in emoji_values:
+            if time.time() - start > total_timeout:
+                break
+            EmojiManager._fetch(value, timeout_per_item)
+
+    @staticmethod
+    def _fetch(emoji_str, timeout):
+        cps = EmojiManager._cps_key(emoji_str)
+        if not cps:
+            return
+
+        with EmojiManager._lock:
+            cached = EmojiManager._cache.get(cps)
+        if cached is not None:
+            return
+
+        edir = emoji_dir()
+        local_path = os.path.join(edir, f"{cps}.png")
+
+        if os.path.exists(local_path) and EmojiManager._load(local_path, 16) is not None:
+            with EmojiManager._lock:
+                EmojiManager._cache[cps] = local_path
+            return
+
+        try:
+            r = requests.get(f"{TWEMOJI_BASE}{cps}.png", timeout=timeout)
+            if r.status_code != 200:
+                with EmojiManager._lock:
+                    EmojiManager._cache[cps] = False
+                return
+            write_file(local_path, r.content)
+            if EmojiManager._load(local_path, 16) is None:
+                with EmojiManager._lock:
+                    EmojiManager._cache[cps] = False
+                return
+            with EmojiManager._lock:
+                EmojiManager._cache[cps] = local_path
+        except Exception:
+            with EmojiManager._lock:
+                EmojiManager._cache[cps] = False
+
+    @staticmethod
+    def _cps_key(emoji_str):
+        return "-".join(format(ord(c), "x") for c in emoji_str if ord(c) != 0xFE0F)
+
+    @staticmethod
+    def get_emoji_image(emoji_str, size):
+        cps = EmojiManager._cps_key(emoji_str)
+        if not cps:
+            return None
+
+        with EmojiManager._lock:
+            cached = EmojiManager._cache.get(cps)
+
+        if not cached or cached is False:
+            return None
+        if not os.path.exists(cached):
+            with EmojiManager._lock:
+                EmojiManager._cache.pop(cps, None)
+            return None
+
+        return EmojiManager._load(cached, size)
+
+    @staticmethod
+    def has_image(emoji_str):
+        cps = EmojiManager._cps_key(emoji_str)
+        with EmojiManager._lock:
+            cached = EmojiManager._cache.get(cps)
+        return bool(cached) and cached is not False and os.path.exists(cached)
+
+    @staticmethod
+    def _load(path, size):
+        try:
+            return Image.open(path).convert("RGBA").resize((size, size), Image.LANCZOS)
+        except Exception:
+            return None
+
+
+class RichTextRenderer:
+    def __init__(self, font, emoji_size, color, line_spacing=12):
+        self.font = font
+        self.emoji_size = emoji_size
+        self.color = color
+        self.line_spacing = line_spacing
+
+    def _token_width(self, draw, token):
+        kind, value = token
+        if kind == "emoji":
+            return self.emoji_size
+        return draw.textbbox((0, 0), value, font=self.font)[2]
+
+    def layout(self, draw, text, max_width):
+        lines = []
+        for raw_line in text.split("\n"):
+            atoms = []
+            for kind, value in EmojiManager.split_text(raw_line):
+                if kind == "text":
+                    atoms += [("text", p) for p in re.split(r"(\s+)", value) if p != ""]
+                elif EmojiManager.has_image(value):
+                    atoms.append(("emoji", value))
+                # эмодзи без загруженной картинки полностью пропускаем,
+                # чтобы в тексте не оставалось пустых дыр
+
+            if not atoms:
+                lines.append([])
+                continue
+
+            cur, cur_w = [], 0
+            for atom in atoms:
+                kind, value = atom
+                w = self._token_width(draw, atom)
+
+                if cur_w + w > max_width and cur:
+                    while cur and cur[-1][0] == "text" and cur[-1][1].isspace():
+                        cur.pop()
+                    lines.append(cur)
+                    cur, cur_w = [], 0
+                    if kind == "text" and value.isspace():
+                        continue
+
+                cur.append((kind, value, w))
+                cur_w += w
+
+            while cur and cur[-1][0] == "text" and cur[-1][1].isspace():
+                cur.pop()
+            lines.append(cur)
+
+        return lines
+
+    def measure(self, draw, text, max_width):
+        lines = self.layout(draw, text, max_width)
+        line_h = self._line_height(draw)
+        total_h = len(lines) * line_h + max(0, len(lines) - 1) * self.line_spacing
+        max_w = max((sum(item[2] for item in line) for line in lines), default=0)
+        return lines, max_w, total_h, line_h
+
+    def _line_height(self, draw):
+        bbox = draw.textbbox((0, 0), "Ay", font=self.font)
+        return max(self.emoji_size, bbox[3] - bbox[1])
+
+    def draw_lines(self, image, draw, lines, x, y, line_h):
+        cy = y
+        for line in lines:
+            cx = x
+            for kind, value, w in line:
+                if kind == "emoji":
+                    emoji_img = EmojiManager.get_emoji_image(value, self.emoji_size)
+                    if emoji_img is not None:
+                        image.paste(emoji_img, (int(cx), int(cy + (line_h - self.emoji_size) // 2)), emoji_img)
+                else:
+                    draw.text((cx, cy), value, font=self.font, fill=self.color)
+                cx += w
+            cy += line_h + self.line_spacing
+
+
+def peer_kind_and_id(peer):
+    if peer is None:
+        return "user", -1
+    if peer.channel_id != 0:
+        return "channel", peer.channel_id
+    if peer.chat_id != 0:
+        return "chat", peer.chat_id
+    return "user", peer.user_id
+
+
+class Entry:
+    def __init__(self):
+        self.author_name = tr("Пользователь", "User")
+        self.avatar_path = None
+        self.message_text = ""
+        self.timestamp = None
+        self.show_time = True
+
+    def display_text(self):
+        text = self.message_text.strip()
+        if not text:
+            return "[медиа]"
+        if len(text) > MAX_MESSAGE_CHARS:
+            text = text[:MAX_MESSAGE_CHARS].rstrip() + "…"
+        return text
+
+
+class EntryResolver:
+    def __init__(self, message_owner, on_done, show_time=True):
+        self.owner = message_owner
+        self.on_done = on_done
+        self.entry = Entry()
+        self.entry.show_time = show_time
+
+    def resolve(self):
+        try:
+            self.entry.message_text = self.owner.message if isinstance(self.owner.message, str) else ""
+            self.entry.timestamp = getattr(self.owner, "date", None)
+
+            from_id = self.owner.from_id
+            if self.owner.fwd_from is not None and self.owner.fwd_from.from_id is not None:
+                from_id = self.owner.fwd_from.from_id
+
+            kind, target_id = peer_kind_and_id(from_id)
+
+            if kind == "user" and target_id != -1:
+                self._resolve_user(target_id)
+                return
+            if kind == "chat":
+                self._resolve_chat(target_id, is_channel=False)
+                return
+            if kind == "channel":
+                self._resolve_chat(target_id, is_channel=True)
+                return
+
+            if self.owner.fwd_from is not None and self.owner.fwd_from.from_id is None and self.owner.fwd_from.from_name:
+                self.entry.author_name = self.owner.fwd_from.from_name
+            else:
+                self.entry.author_name = tr("Аноним", "Anonymous")
+            self.on_done(self.entry)
+        except Exception:
+            flog("EntryResolver.resolve error\n" + traceback.format_exc())
+            self.entry.author_name = tr("Аноним", "Anonymous")
+            self.on_done(self.entry)
+
+    def _resolve_user(self, user_id):
+        try:
+            user = get_messages_controller().getUser(user_id)
+            if user is None:
+                self.on_done(self.entry)
+                return
+
+            self.entry.author_name = self._plain_name(user)
+            self._request_avatar(user)
+        except Exception:
+            flog("_resolve_user error\n" + traceback.format_exc())
+            self.on_done(self.entry)
+
+    def _plain_name(self, user):
+        first, last = user.first_name or "", user.last_name or ""
+        name = " ".join([first, last]).strip()
+        return name if name else tr("Пользователь", "User")
+
+    def _request_avatar(self, user):
+        try:
+            req = TLRPC.TL_photos_getUserPhotos()
+            req.user_id = get_messages_controller().getInputUser(user.id)
+            req.limit = 1
+            send_request(req, RequestCallback(self._on_user_photos))
+        except Exception:
+            flog("_request_avatar error\n" + traceback.format_exc())
+            self.on_done(self.entry)
+
+    def _on_user_photos(self, response, error):
+        try:
+            if not error and response and response.photos is not None and response.photos.size() > 0:
+                photo = response.photos.get(0)
+                size = photo.sizes.get(0)
+                req = TLRPC.TL_upload_getFile()
+                req.location = self._photo_location(photo, size)
+                req.offset = 0
+                req.limit = 1024 * 1024
+                send_request(req, RequestCallback(self._on_file_downloaded))
+                return
+        except Exception:
+            flog("_on_user_photos error\n" + traceback.format_exc())
+        self.on_done(self.entry)
+
+    def _photo_location(self, photo, size):
+        # thumb_size = size.type, иначе Telegram не отдаёт файл
+        loc = TLRPC.TL_inputPhotoFileLocation()
+        loc.id = photo.id
+        loc.access_hash = photo.access_hash
+        loc.file_reference = photo.file_reference
+        loc.thumb_size = size.type
+        return loc
+
+    def _on_file_downloaded(self, response, error):
+        try:
+            if error or not response:
+                flog(f"avatar download error: {getattr(error, 'text', error)}")
+                self.on_done(self.entry)
+                return
+            buffer = response.bytes.buffer
+            buffer.rewind()
+            length = buffer.remaining()
+            data = bytes([buffer.get() & 0xFF for _ in range(length)])
+            path = os.path.join(temp_dir(), f"avatar_{uuid.uuid4()}.jpg")
+            write_file(path, data)
+            self.entry.avatar_path = path
+            self.on_done(self.entry)
+        except Exception:
+            flog("_on_file_downloaded error\n" + traceback.format_exc())
+            self.on_done(self.entry)
+
+    def _resolve_chat(self, chat_id, is_channel):
+        try:
+            chat = get_messages_controller().getChat(chat_id)
+            self.entry.author_name = chat.title if chat is not None and chat.title else (tr("Канал", "Channel") if is_channel else tr("Группа", "Group"))
+
+            if chat is not None and getattr(chat, "photo", None) is not None and chat.photo.photo_id != 0:
+                req = TLRPC.TL_upload_getFile()
+                loc = TLRPC.TL_inputPeerPhotoFileLocation()
+                loc.big = True
+                peer = TLRPC.TL_peerChannel() if is_channel else TLRPC.TL_peerChat()
+                if is_channel:
+                    peer.channel_id = chat_id
+                else:
+                    peer.chat_id = chat_id
+                loc.peer = get_messages_controller().getInputPeer(peer)
+                loc.photo_id = chat.photo.photo_id
+                req.location = loc
+                req.offset = 0
+                req.limit = 1024 * 1024
+                send_request(req, RequestCallback(self._on_file_downloaded))
+                return
+        except Exception:
+            flog("_resolve_chat error\n" + traceback.format_exc())
+        self.on_done(self.entry)
+
+
+class CardRenderer:
+    PAD = 40
+    AVATAR_SIZE = 110
+    GAP = 30
+
+    @staticmethod
+    def render_single(entry):
+        block, avatar_rect = CardRenderer._render_block(entry, width_hint=None)
+        ax, ay, asize = avatar_rect
+        return block, [(entry, ax, ay, asize)]
+
+    @staticmethod
+    def render_multi(entries):
+        pad = CardRenderer.PAD
+        rendered = []
+        safe_entries = []
+        for e in entries:
+            try:
+                rendered.append(CardRenderer._render_block(e, width_hint=760))
+                safe_entries.append(e)
+            except Exception:
+                flog("render_multi block error\n" + traceback.format_exc())
+        if not rendered:
+            raise RuntimeError("no blocks rendered")
+        entries = safe_entries
+        blocks = [r[0] for r in rendered]
+        max_w = max(MIN_CARD_WIDTH, min(max(b.width for b in blocks), MAX_CARD_WIDTH))
+
+        total_h = sum(b.height for b in blocks) + pad * (len(blocks) + 1)
+        card = Image.new("RGB", (max_w, total_h), (255, 255, 255))
+        draw = ImageDraw.Draw(card)
+
+        if len(blocks) > 1:
+            thread_x = pad + CardRenderer.AVATAR_SIZE // 2
+            top_y = pad + CardRenderer.AVATAR_SIZE // 2
+            last_top = pad + sum(b.height + pad for b in blocks[:-1])
+            bottom_y = last_top + CardRenderer.AVATAR_SIZE // 2
+            draw.line([(thread_x, top_y), (thread_x, bottom_y)], fill=(225, 225, 225), width=4)
+
+        avatar_rects = []
+        y = pad
+        for (block, (ax, ay, asize)), entry in zip(rendered, entries):
+            card.paste(block, (0, y))
+            avatar_rects.append((entry, ax, y + ay, asize))
+            y += block.height + pad
+
+        return card, avatar_rects
+
+    @staticmethod
+    def _fit_name_line(renderer, draw, name, max_width):
+        line = renderer.layout(draw, name, 10 ** 6)[0]
+        total_w = sum(item[2] for item in line)
+        if total_w <= max_width:
+            return line, total_w
+
+        ellipsis_w = draw.textbbox((0, 0), "…", font=renderer.font)[2]
+        cur, cur_w = [], 0
+        budget = max_width - ellipsis_w
+        for kind, value, w in line:
+            if cur_w + w > budget:
+                break
+            cur.append((kind, value, w))
+            cur_w += w
+        cur.append(("text", "…", ellipsis_w))
+        return cur, cur_w + ellipsis_w
+
+    @staticmethod
+    def _sanitize_name(name):
+        if not name:
+            return tr("Пользователь", "User")
+        out = []
+        for ch in name:
+            cp = ord(ch)
+            if 0xE000 <= cp <= 0xF8FF:
+                continue
+            if cp < 0x20 and ch != "\n":
+                continue
+            out.append(ch)
+        result = "".join(out).strip()
+        return result if result else tr("Пользователь", "User")
+
+    @staticmethod
+    def _render_block(entry, width_hint):
+        pad, avatar_size, gap = CardRenderer.PAD, CardRenderer.AVATAR_SIZE, CardRenderer.GAP
+        text_col_width = width_hint or 760
+
+        bold_28 = FontManager.get_bold(30)
+        bold_36 = FontManager.get_bold(38)
+
+        dummy_draw = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+
+        clean_name = CardRenderer._sanitize_name(entry.author_name)
+        display_text = entry.display_text()
+
+        emoji_tokens = [v for k, v in EmojiManager.split_text(clean_name) if k == "emoji"]
+        emoji_tokens += [v for k, v in EmojiManager.split_text(display_text) if k == "emoji"]
+        EmojiManager.preload(emoji_tokens)
+
+        name_renderer = RichTextRenderer(bold_28, emoji_size=32, color=(120, 120, 120), line_spacing=0)
+        name_line, name_w = CardRenderer._fit_name_line(name_renderer, dummy_draw, clean_name, text_col_width)
+        name_bbox = dummy_draw.textbbox((0, 0), "Ay", font=bold_28)
+        name_h = max(32, name_bbox[3] - name_bbox[1])
+
+        body_renderer = RichTextRenderer(bold_36, emoji_size=44, color=(20, 20, 20), line_spacing=12)
+        lines, text_w, text_h, line_h = body_renderer.measure(dummy_draw, display_text, text_col_width)
+
+        time_text = ""
+        time_h_reserved = 0
+        if entry.show_time and entry.timestamp:
+            time_text = format_message_time(entry.timestamp, DEFAULT_TIME_FORMAT)
+            if time_text:
+                time_h_reserved = 34
+
+        block_h = max(avatar_size, name_h + 16 + text_h + time_h_reserved) + pad // 2
+        block_w = max(MIN_CARD_WIDTH, min(pad + avatar_size + gap + max(text_w, name_w, 200) + pad, MAX_CARD_WIDTH))
+
+        block = Image.new("RGB", (block_w, block_h), (255, 255, 255))
+        draw = ImageDraw.Draw(block)
+
+        text_x = pad + avatar_size + gap
+        name_renderer.draw_lines(block, draw, [name_line], text_x, 0, name_h)
+        body_renderer.draw_lines(block, draw, lines, text_x, name_h + 16, line_h)
+
+        if time_text:
+            time_font = FontManager.get_regular(22)
+            time_bbox = draw.textbbox((0, 0), time_text, font=time_font)
+            time_w = time_bbox[2] - time_bbox[0]
+            time_x = block_w - pad - time_w
+            time_y = block_h - time_h_reserved // 2 - (time_bbox[3] - time_bbox[1]) // 2
+            draw.text((time_x, time_y), time_text, font=time_font, fill=(170, 170, 170))
+
+        avatar_rect = (pad, 0, avatar_size)
+        return block, avatar_rect
+
+    @staticmethod
+    def render_avatar_image(entry, size):
+        img = None
+        if entry.avatar_path and os.path.exists(entry.avatar_path):
+            try:
+                img = ImageOps.fit(Image.open(entry.avatar_path).convert("RGB"), (size, size), Image.LANCZOS)
+            except Exception:
+                img = None
+        if img is None:
+            img = CardRenderer._letter_avatar(entry.author_name, size)
+
+        mask = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, size, size), fill=255)
+        out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        out.paste(img, (0, 0))
+        out.putalpha(mask)
+        return out
+
+    @staticmethod
+    def _letter_avatar(name, size):
+        colors = [(255, 99, 71), (60, 179, 113), (65, 105, 225), (238, 130, 238), (255, 165, 0)]
+        color = colors[sum(ord(c) for c in name) % len(colors)] if name else colors[0]
+        img = Image.new("RGB", (size, size), color)
+        draw = ImageDraw.Draw(img)
+        letter = name.strip()[0].upper() if name.strip() else "?"
+        font = FontManager.get_bold(int(size * 0.45))
+        bbox = draw.textbbox((0, 0), letter, font=font)
+        w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        draw.text(((size - w) // 2 - bbox[0], (size - h) // 2 - bbox[1]), letter, font=font, fill=(255, 255, 255))
+        return img
+
+
+def build_final_image(card, avatar_rects):
+    frame = Image.open(FrameManager.frame_path).convert("RGBA")
+    frame_w, frame_h = frame.size
+
+    left, top, right, bottom = FrameManager.inner_box
+    inner_w, inner_h = right - left, bottom - top
+    target_ratio = inner_w / inner_h
+
+    card_w, card_h = card.size
+    card_ratio = card_w / card_h
+
+    pad_left = pad_top = 0
+    padded = card
+    if card_ratio > target_ratio * MAX_ASPECT_DISTORTION:
+        wanted_h = int(card_w / (target_ratio * MAX_ASPECT_DISTORTION))
+        extra = max(0, wanted_h - card_h)
+        pad_top = extra // 2
+        padded = Image.new("RGB", (card_w, card_h + extra), (255, 255, 255))
+        padded.paste(card, (0, pad_top))
+    elif card_ratio < target_ratio / MAX_ASPECT_DISTORTION:
+        wanted_w = int(card_h * target_ratio / MAX_ASPECT_DISTORTION)
+        extra = max(0, wanted_w - card_w)
+        pad_left = extra // 2
+        padded = Image.new("RGB", (card_w + extra, card_h), (255, 255, 255))
+        padded.paste(card, (pad_left, 0))
+
+    padded_w, padded_h = padded.size
+    scale_x = inner_w / padded_w
+    scale_y = inner_h / padded_h
+
+    stretched = padded.resize((inner_w, inner_h), Image.LANCZOS)
+    canvas = Image.new("RGBA", (frame_w, frame_h), (0, 0, 0, 255))
+    canvas.paste(stretched, (left, top))
+
+    # аватарки рисуем отдельным слоем поверх уже растянутого изображения,
+    # используя РАВНОМЕРНЫЙ масштаб (не scale_x/scale_y по отдельности),
+    # чтобы круг оставался кругом и не превращался в овал
+    avg_scale = (scale_x + scale_y) / 2
+    for entry, ax, ay, asize in avatar_rects:
+        screen_size = max(1, int(asize * avg_scale))
+        screen_x = left + int((ax + pad_left) * scale_x)
+        screen_y = top + int((ay + pad_top) * scale_y)
+        avatar_img = CardRenderer.render_avatar_image(entry, screen_size)
+        canvas.alpha_composite(avatar_img, (screen_x, screen_y))
+
+    canvas.alpha_composite(frame)
+    return canvas.convert("RGB")
+
+
+def send_photo(params, path):
+    try:
+        photo = get_send_messages_helper().generatePhotoSizes(path, None)
+        if photo is None:
+            BulletinHelper.show_error(tr("Не удалось подготовить фото к отправке", "Failed to prepare the photo for sending"))
+            return
+
+        send_params = {"message": None, "peer": params.peer, "photo": photo, "path": path}
+        reply_to = getattr(params, "replyToMsg", None)
+        reply_top = getattr(params, "replyToTopMsg", None)
+        if reply_to is not None:
+            send_params["replyToMsg"] = reply_to
+        if reply_top is not None:
+            send_params["replyToTopMsg"] = reply_top
+
+        send_message(send_params)
+    except Exception:
+        flog("send_photo error\n" + traceback.format_exc())
+        BulletinHelper.show_error(tr("Не удалось отправить фото, подробности в логах плагина", "Failed to send the photo, check plugin logs for details"))
+
+
+class CollectSession:
+    def __init__(self, target_count):
+        self.target_count = target_count
+        self.owners = []
+
+
+class SessionStore:
+    _sessions = {}
+    _lock = threading.Lock()
+
+    @staticmethod
+    def _key(params):
+        try:
+            peer = params.peer
+            return f"{getattr(peer, 'channel_id', 0)}_{getattr(peer, 'chat_id', 0)}_{getattr(peer, 'user_id', 0)}"
+        except Exception:
+            return "default"
+
+    @staticmethod
+    def start(params, target_count):
+        with SessionStore._lock:
+            SessionStore._sessions[SessionStore._key(params)] = CollectSession(target_count)
+
+    @staticmethod
+    def cancel(params):
+        with SessionStore._lock:
+            SessionStore._sessions.pop(SessionStore._key(params), None)
+
+    @staticmethod
+    def get(params):
+        with SessionStore._lock:
+            return SessionStore._sessions.get(SessionStore._key(params))
+
+    @staticmethod
+    def add_owner(params, owner):
+        with SessionStore._lock:
+            key = SessionStore._key(params)
+            session = SessionStore._sessions.get(key)
+            if session is None:
+                return None, False
+            session.owners.append(owner)
+            done = len(session.owners) >= session.target_count
+            if done:
+                SessionStore._sessions.pop(key, None)
+            return session, done
+
+
+class FrameJob:
+    def __init__(self, params, owners, show_time=True, font_profile_id=None):
+        self.params = params
+        self.owners = owners
+        self.entries = [None] * len(owners)
+        self.remaining = len(owners)
+        self.show_time = show_time
+        self.font_profile_id = font_profile_id or DEFAULT_FONT_PROFILE
+        self._lock = threading.Lock()
+
+    def run(self):
+        for i, owner in enumerate(self.owners):
+            EntryResolver(owner, self._callback(i), show_time=self.show_time).resolve()
+
+    def _callback(self, index):
+        def done(entry):
+            with self._lock:
+                self.entries[index] = entry
+                self.remaining -= 1
+                finished = self.remaining <= 0
+            if finished:
+                self._finish()
+        return done
+
+    def _finish(self):
+        try:
+            if not FrameManager.ensure_ready(timeout=25):
+                BulletinHelper.show_error(tr(
+                    "Рамка не загрузилась. Попробуй ещё раз или зайди в настройки плагина - Установить зависимости.",
+                    "Frame didn't load. Try again or go to plugin settings - Install dependencies."
+                ))
+                return
+
+            _current_font_profile[0] = self.font_profile_id
+            if not FontManager.is_ready(self.font_profile_id):
+                FontManager.init(self.font_profile_id)
+            if not FontManager.ensure_ready(timeout=25, profile_id=self.font_profile_id):
+                BulletinHelper.show_error(tr(
+                    "Шрифт не загрузился. Попробуй ещё раз или зайди в настройки плагина - Установить зависимости.",
+                    "Font didn't load. Try again or go to plugin settings - Install dependencies."
+                ))
+                return
+
+            if len(self.entries) == 1:
+                card, avatar_rects = CardRenderer.render_single(self.entries[0])
+            else:
+                card, avatar_rects = CardRenderer.render_multi(self.entries)
+            final = build_final_image(card, avatar_rects)
+
+            out_path = os.path.join(temp_dir(), f"tiktok_frame_{uuid.uuid4()}.jpg")
+            final.save(out_path, quality=95)
+            send_photo(self.params, out_path)
+        except Exception:
+            flog("FrameJob._finish error\n" + traceback.format_exc())
+            BulletinHelper.show_error(tr("Ошибка при сборке изображения, смотри логи плагина", "Error while building the image, check plugin logs"))
+
+
+class TikTokFramePlugin(BasePlugin):
+    def on_plugin_load(self):
+        try:
+            saved_index = self.get_setting("font_profile_index", 0)
+            saved_profile = FONT_PROFILE_ORDER[saved_index] if 0 <= saved_index < len(FONT_PROFILE_ORDER) else DEFAULT_FONT_PROFILE
+            _current_font_profile[0] = saved_profile
+            FontManager.init(saved_profile)
+            if saved_profile != DEFAULT_FONT_PROFILE:
+                FontManager.init(DEFAULT_FONT_PROFILE)
+            FrameManager.init()
+            self.add_on_send_message_hook()
+        except Exception:
+            flog("on_plugin_load error\n" + traceback.format_exc())
+
+    def _command(self):
+        cmd = (self.get_setting("command", DEFAULT_COMMAND) or DEFAULT_COMMAND).strip().lower()
+        return cmd if cmd.startswith(".") else "." + cmd
+
+    def _font_profile_index(self):
+        try:
+            idx = self.get_setting("font_profile_index", 0)
+            return idx if 0 <= idx < len(FONT_PROFILE_ORDER) else 0
+        except Exception:
+            return 0
+
+    def _on_font_selector_changed(self, index):
+        try:
+            profile_id = FONT_PROFILE_ORDER[index] if 0 <= index < len(FONT_PROFILE_ORDER) else DEFAULT_FONT_PROFILE
+            _current_font_profile[0] = profile_id
+            if not FontManager.is_ready(profile_id):
+                BulletinHelper.show_info(tr(f"Качаю шрифт {FONT_PROFILES[profile_id]['label']}...", f"Downloading {FONT_PROFILES[profile_id]['label']} font..."))
+                FontManager.init(profile_id)
+        except Exception:
+            flog("_on_font_selector_changed error\n" + traceback.format_exc())
+
+    def create_settings(self):
+        cmd = self._command()
+        return [
+            Header("Tiktokframe"),
+            Input(
+                key="command",
+                text=tr("Команда вызова", "Trigger command"),
+                default=DEFAULT_COMMAND,
+                subtext=tr(f"Сейчас: {cmd}. Например: .f, .frame, .quote, регистр не важен", f"Currently: {cmd}. Example: .f, .frame, .quote, case doesn't matter"),
+                icon="input_alpha",
+            ),
+            Divider(),
+            Header(tr("Оформление", "Appearance")),
+            Switch(
+                key="show_time",
+                text=tr("Показывать время сообщения", "Show message time"),
+                default=True,
+                subtext=tr("Время оригинального сообщения в правом нижнем углу карточки", "Original message time in the bottom-right corner of the card"),
+                icon="msg_calendar2",
+            ),
+            Selector(
+                key="font_profile_index",
+                text=tr("Шрифт", "Font"),
+                default=self._font_profile_index(),
+                items=[FONT_PROFILES[pid]["label"] for pid in FONT_PROFILE_ORDER],
+                icon="msg_photo_text_regular",
+                on_change=self._on_font_selector_changed,
+            ),
+            Divider(),
+            Header(tr("Зависимости", "Dependencies")),
+            Text(
+                text=tr("Установить зависимости", "Install dependencies"),
+                icon="msg_download",
+                on_click=self._install_dependencies,
+            ),
+            Text(
+                text=tr("Проверить зависимости", "Check dependencies"),
+                icon="msg_photo_text_regular",
+                on_click=self._check_dependencies,
+            ),
+            Divider(),
+            Header(tr("О плагине", "About")),
+            Text(
+                text=tr("Инструкция", "Instructions"),
+                icon="msg_help",
+                on_click=self._show_about_alert,
+            ),
+        ]
+
+    def _install_dependencies(self, view=None):
+        BulletinHelper.show_info(tr("Качаю шрифт и рамку заново...", "Downloading font and frame again..."))
+
+        def worker():
+            try:
+                profile_id = _current_font_profile[0]
+                FontManager.reset(profile_id)
+                FontManager.init(profile_id)
+                FrameManager.force_refresh()
+                FontManager.ensure_ready(30, profile_id)
+                FrameManager.ensure_ready(30)
+                if FontManager.is_ready(profile_id) and FrameManager.is_ready():
+                    BulletinHelper.show_success(tr("Зависимости установлены", "Dependencies installed"))
+                else:
+                    BulletinHelper.show_error(tr(
+                        "Не удалось скачать часть зависимостей, проверь интернет и попробуй ещё раз",
+                        "Failed to download some dependencies, check your internet connection and try again"
+                    ))
+            except Exception:
+                flog("_install_dependencies worker error\n" + traceback.format_exc())
+                BulletinHelper.show_error(tr("Не удалось установить зависимости", "Failed to install dependencies"))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _check_dependencies(self, view=None):
+        try:
+            profile_id = _current_font_profile[0]
+            font_ok = FontManager.is_ready(profile_id)
+            frame_ok = FrameManager.is_ready()
+            font_label = tr("Шрифт", "Font")
+            frame_label = tr("Рамка", "Frame")
+            status = f"{font_label}: {'ok' if font_ok else 'missing'}   {frame_label}: {'ok' if frame_ok else 'missing'}"
+            if font_ok and frame_ok:
+                BulletinHelper.show_success(status)
+            else:
+                hint = tr("\nЕсли что-то не готово, нажми Установить зависимости", "\nIf something is missing, tap Install dependencies")
+                BulletinHelper.show_info(status + hint)
+        except Exception:
+            flog("_check_dependencies error\n" + traceback.format_exc())
+
+    def _about_text(self, cmd):
+        if is_english():
+            return (
+                f"TikTok Frame v{__version__}\n\n"
+                f"Commands:\n"
+                f"{cmd} - reply to a message in a DM or group and it gets sent back framed as a picture\n\n"
+                f"{cmd}(1,2,3,4) - to put several messages in one frame, reply to a message with "
+                f"{cmd}(how many messages to collect)\n"
+                f"example {cmd}2, then reply to the messages you want with {cmd}\n\n"
+                f"{cmd}0 - cancel the collection if you changed your mind\n\n"
+                f"Detailed usage instructions at t.me/w3rs_c0mmun17y, for any questions message the channel"
+            )
+        return (
+            f"TikTok Frame v{__version__}\n\n"
+            f"Команды:\n"
+            f"{cmd} - ответь на сообщение в лс или группе и его сообщение отправится в рамке как картинка\n\n"
+            f"{cmd}(1,2,3,4) - если хочешь поставить сразу несколько сообщений в рамку ответь на сообщение "
+            f"{cmd}(количество сообщений которое собрать)\n"
+            f"пример {cmd}2, после собери другие сообщения командой {cmd}, отвечая на нужные сообщения\n\n"
+            f"{cmd}0 - отменить сбор сообщений если передумал\n\n"
+            f"Подробная инструкция пользования в t.me/w3rs_c0mmun17y, по любыми вопросами обращайтесь в сообщения каналу"
+        )
+
+    def _show_about_alert(self, view=None):
+        from ui.alert import AlertDialogBuilder
+        from org.telegram.messenger import ApplicationLoader
+        from client_utils import get_last_fragment
+
+        cmd = self._command()
+        fragment = get_last_fragment()
+        ctx = fragment.getContext() if fragment else ApplicationLoader.applicationContext
+
+        builder = AlertDialogBuilder(ctx, AlertDialogBuilder.ALERT_TYPE_MESSAGE)
+        builder.set_title(f"Tiktokframe v{__version__}")
+        builder.set_message(self._about_text(cmd))
+        builder.set_positive_button(tr("Понял", "Got it"), lambda d, w: None)
+        builder.set_cancelable(True)
+        builder.set_canceled_on_touch_outside(True)
+        builder.show()
+        self._about_alert_instance = builder
+
+    def on_send_message_hook(self, account, params) -> HookResult:
+        try:
+            if not isinstance(params.message, str):
+                return HookResult()
+
+            text = params.message.strip().lower()
+            cmd = self._command()
+
+            if text == cmd + "0":
+                SessionStore.cancel(params)
+                BulletinHelper.show_info(tr("Набор сообщений для рамки отменён", "Message collection for the frame cancelled"))
+                return HookResult(strategy=HookStrategy.CANCEL)
+
+            m = re.fullmatch(re.escape(cmd) + r"([234])", text)
+            if m:
+                return self._handle_command(params, target_count=int(m.group(1)))
+
+            if text == cmd:
+                return self._handle_command(params, target_count=None)
+
+            return HookResult()
+        except Exception:
+            flog("on_send_message_hook error\n" + traceback.format_exc())
+            return HookResult()
+
+    def _handle_command(self, params, target_count) -> HookResult:
+        try:
+            owner = self._reply_owner(params)
+            if owner is None:
+                BulletinHelper.show_error(tr(f"Ответь на сообщение, чтобы использовать {self._command()}", f"Reply to a message to use {self._command()}"))
+                return HookResult(strategy=HookStrategy.CANCEL)
+
+            if not self._is_text_message(owner):
+                BulletinHelper.show_error(tr("Ответь только на текст!", "Reply only to text messages!"))
+                return HookResult(strategy=HookStrategy.CANCEL)
+
+            session = SessionStore.get(params)
+
+            if session is None and target_count is None:
+                self._run_job(params, [owner])
+                return HookResult(strategy=HookStrategy.CANCEL)
+
+            if session is None:
+                SessionStore.start(params, target_count)
+
+            session, is_complete = SessionStore.add_owner(params, owner)
+            if session is None:
+                self._run_job(params, [owner])
+                return HookResult(strategy=HookStrategy.CANCEL)
+
+            if not is_complete:
+                collected = len(session.owners)
+                remain = session.target_count - collected
+                cmd = self._command()
+                if is_english():
+                    msg = (
+                        f"Collected {collected}/{session.target_count}. Reply with {cmd} to "
+                        f"{remain} more message{'s' if remain != 1 else ''}, or {cmd}0 to cancel."
+                    )
+                else:
+                    msg = (
+                        f"Собрано {collected}/{session.target_count}. Ответь {cmd} ещё "
+                        f"на {remain} сообщени{'е' if remain == 1 else 'я'}, или {cmd}0 для отмены."
+                    )
+                BulletinHelper.show_info(msg)
+                return HookResult(strategy=HookStrategy.CANCEL)
+
+            self._run_job(params, session.owners)
+            return HookResult(strategy=HookStrategy.CANCEL)
+        except Exception:
+            flog("_handle_command error\n" + traceback.format_exc())
+            BulletinHelper.show_error(tr("Что-то пошло не так, попробуй ещё раз", "Something went wrong, try again"))
+            return HookResult(strategy=HookStrategy.CANCEL)
+
+    def _run_job(self, params, owners):
+        try:
+            show_time = self.get_setting("show_time", True)
+            font_index = self.get_setting("font_profile_index", 0)
+            font_profile_id = FONT_PROFILE_ORDER[font_index] if 0 <= font_index < len(FONT_PROFILE_ORDER) else DEFAULT_FONT_PROFILE
+            FrameJob(params, owners, show_time=show_time, font_profile_id=font_profile_id).run()
+        except Exception:
+            flog("_run_job error\n" + traceback.format_exc())
+            BulletinHelper.show_error(tr("Ошибка плагина Tiktokframe, подробности в логах", "Tiktokframe plugin error, check logs for details"))
+
+    def _reply_owner(self, params):
+        reply_obj = getattr(params, "replyToMsg", None) or getattr(params, "reply_to_message", None)
+        return reply_obj.messageOwner if reply_obj is not None else None
+
+    def _is_text_message(self, owner):
+        if not isinstance(owner.message, str) or not owner.message.strip():
+            return False
+        media = getattr(owner, "media", None)
+        if media is not None:
+            try:
+                class_name = media.getClass().getSimpleName()
+                if class_name and class_name != "TL_messageMediaEmpty":
+                    return False
+            except Exception:
+                return False
+        return True
