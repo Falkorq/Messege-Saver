@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="480" viewBox="0 0 1280 480" role="img" aria-labelledby="title desc">
+  <title id="title">Messege-Saver — Personal Bot</title>
+  <desc id="desc">Telegram Business: сообщения, правки, история. Иллюстрация сохранения двух версий сообщения.</desc>
+  <rect width="1280" height="480" fill="#121a31"/>
+  <path d="M0 407H1280" stroke="#32405d"/>
+  <text x="64" y="87" fill="#a8badf" font-family="Consolas,monospace" font-size="22">Personal Bot / Telegram Business</text>
+  <text x="60" y="212" fill="#f3f5fc" font-family="Arial,sans-serif" font-size="76" font-weight="700" letter-spacing="-3">Messege-Saver</text>
+  <text x="66" y="271" fill="#aabde9" font-family="Arial,sans-serif" font-size="28">сообщения остаются в истории</text>
+  <text x="66" y="331" fill="#b7c0d5" font-family="Arial,sans-serif" font-size="21">правки · удаления · профили · статистика</text>
+  <g font-family="Arial,sans-serif">
+    <path d="M799 104H1172Q1188 104 1188 120V189Q1188 205 1172 205H821L799 222V120Q799 104 815 104" fill="#25324e"/>
+    <text x="825" y="138" fill="#a8badf" font-size="17">Было</text>
+    <text x="825" y="175" fill="#f3f5fc" font-size="25">Встречаемся в 18:00</text>
+    <path d="M831 238H1204Q1220 238 1220 254V323Q1220 339 1204 339H853L831 356V254Q831 238 847 238" fill="#33466d"/>
+    <text x="857" y="272" fill="#c4d4f7" font-size="17">Стало</text>
+    <text x="857" y="309" fill="#f3f5fc" font-size="25">Встречаемся в 19:00</text>
+    <path d="M778 146H753V289H810M744 289L753 298L762 289" fill="none" stroke="#aabde9" stroke-width="2"/>
+  </g>
+  <text x="66" y="451" fill="#a8badf" font-family="Consolas,monospace" font-size="19">Python + Telethon + SQLite</text>
+  <text x="1216" y="451" fill="#a8badf" font-family="Consolas,monospace" font-size="19" text-anchor="end">by Falkorq</text>
+</svg>
