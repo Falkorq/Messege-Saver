@@ -10,7 +10,7 @@ from profile_monitor.telegram_client import ProfileTelegramClient
 from telethon.tl.types import InputUser
 
 
-def snapshot(user_id=10, username="old", first_name="Yuki", last_name=None,
+def snapshot(user_id=10, username="old", first_name="Test User", last_name=None,
              bio="old bio", photo_id="photo-1"):
     return ProfileSnapshot(user_id, username, first_name, last_name, bio, photo_id)
 
@@ -24,7 +24,7 @@ class SnapshotComparisonTests(unittest.TestCase):
         self.assertEqual(compare_snapshots(snapshot(username=None), old), [("username", None, "old")])
 
     def test_name_bio_and_multiple_fields(self):
-        changes = compare_snapshots(snapshot(), snapshot(first_name="Yuna", last_name="Dev", bio=None))
+        changes = compare_snapshots(snapshot(), snapshot(first_name="Updated User", last_name="Dev", bio=None))
         self.assertEqual([item[0] for item in changes], ["first_name", "last_name", "bio"])
 
     def test_photo_changed_removed_and_returned(self):
@@ -80,7 +80,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_multiple_changes_create_one_notification_and_one_batch(self):
         self.repo.add(1, snapshot())
-        tg = FakeTelegram([snapshot(username="new", first_name="Yuna", bio="new bio")])
+        tg = FakeTelegram([snapshot(username="new", first_name="Updated User", bio="new bio")])
         service = ProfileMonitorService(self.repo, tg, self.notifier)
         changes = await service.check(1, 10)
         self.assertEqual(len(changes), 3)
@@ -143,11 +143,11 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_rewatch_fills_missing_username_without_change_event(self):
         self.repo.add(1, snapshot(username=None), access_hash=None)
-        tg = FakeTelegram([snapshot(username="serophito")])
+        tg = FakeTelegram([snapshot(username="test_profile")])
         service = ProfileMonitorService(self.repo, tg, self.notifier)
-        current, added = await service.watch(1, "@serophito")
+        current, added = await service.watch(1, "@test_profile")
         self.assertFalse(added)
-        self.assertEqual(current.username, "serophito")
+        self.assertEqual(current.username, "test_profile")
         self.assertEqual(self.repo.history(1), [])
 
     async def test_rewatch_known_id_recovers_hash_without_resetting_baseline(self):
@@ -156,7 +156,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         service = ProfileMonitorService(self.repo, tg, self.notifier)
         current, added = await service.watch(1, "10")
         self.assertFalse(added)
-        self.assertEqual(current.first_name, "Yuki")
+        self.assertEqual(current.first_name, "Test User")
         self.assertEqual(self.repo.get(1, 10)["access_hash"], 987654321)
         self.assertEqual(self.repo.history(1), [])
 
@@ -169,7 +169,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             "added_at INTEGER,enabled INTEGER,last_error TEXT)"
         )
         db.execute(
-            "INSERT INTO profile_watchers VALUES(1,10,'old','Yuki',NULL,NULL,NULL,0,0,1,NULL)"
+            "INSERT INTO profile_watchers VALUES(1,10,'old','Test User',NULL,NULL,NULL,0,0,1,NULL)"
         )
         migrated = ProfileRepository(db)
         migrated.migrate()
@@ -203,7 +203,7 @@ class TelegramClientTests(unittest.IsolatedAsyncioTestCase):
             async def __call__(self, request):
                 user = SimpleNamespace(
                     id=10, username=None,
-                    usernames=[SimpleNamespace(username="serophito", active=True)],
+                    usernames=[SimpleNamespace(username="test_profile", active=True)],
                     access_hash=123456789, first_name="Name", last_name=None, photo=None,
                 )
                 return SimpleNamespace(users=[user], full_user=SimpleNamespace(about=None))
@@ -211,14 +211,14 @@ class TelegramClientTests(unittest.IsolatedAsyncioTestCase):
         wrapper = ProfileTelegramClient.__new__(ProfileTelegramClient)
         wrapper.client = FakeClient()
         profile, _ = await wrapper.fetch(10, access_hash=123456789)
-        self.assertEqual(profile.username, "serophito")
+        self.assertEqual(profile.username, "test_profile")
 
     async def test_username_resolution_keeps_hash_when_full_user_is_minimal(self):
         class FakeClient:
             async def get_entity(self, target):
                 self.target = target
                 return SimpleNamespace(
-                    id=10, username="serophito", access_hash=123456789,
+                    id=10, username="test_profile", access_hash=123456789,
                     first_name="Name", last_name=None, photo=None,
                 )
 
@@ -231,8 +231,8 @@ class TelegramClientTests(unittest.IsolatedAsyncioTestCase):
 
         wrapper = ProfileTelegramClient.__new__(ProfileTelegramClient)
         wrapper.client = FakeClient()
-        profile, entity = await wrapper.fetch("serophito")
-        self.assertEqual(profile.username, "serophito")
+        profile, entity = await wrapper.fetch("test_profile")
+        self.assertEqual(profile.username, "test_profile")
         self.assertEqual(entity.access_hash, 123456789)
 
     async def test_saved_hash_fetches_profile_without_entity_cache(self):
@@ -243,7 +243,7 @@ class TelegramClientTests(unittest.IsolatedAsyncioTestCase):
             async def __call__(self, request):
                 self.requests.append(request)
                 user = SimpleNamespace(
-                    id=10, username="new", first_name="Yuna", last_name=None,
+                    id=10, username="new", first_name="Updated User", last_name=None,
                     photo=None, access_hash=987654321,
                 )
                 return SimpleNamespace(users=[user], full_user=SimpleNamespace(about="bio"))
